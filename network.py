@@ -15,7 +15,9 @@ import random
 # Third-party libraries
 import numpy as np
 from sklearn import datasets, linear_model
+import matplotlib.pyplot as plt
 from activations.relu import Relu
+from activations.leaky_relu import LRelu
 from activations.sigmoid import Sigmoid
 
 class Network(object):
@@ -34,8 +36,6 @@ class Network(object):
         self.num_layers = len(sizes)
         self.sizes = sizes
         self.biases = [np.random.randn(y, 1) for y in sizes[1:]]
-        print(self.biases)
-        exit()
         self.weights = [np.random.randn(y, x)
                         for x, y in zip(sizes[:-1], sizes[1:])]
         self.activation = activation
@@ -71,6 +71,7 @@ class Network(object):
             else:
                 print("Epoch {0} complete".format(j))
 
+
     def update_mini_batch(self, mini_batch, eta):
         """Update the network's weights and biases by applying
         gradient descent using backpropagation to a single mini batch.
@@ -100,19 +101,14 @@ class Network(object):
         zs = [] # list to store all the z vectors, layer by layer
         for b, w in zip(self.biases, self.weights):
             z = np.dot(w, activation)+b
-            print('w:', w)
-            print('b:', b)
-            print('activation:', activation)
-            print('z:', z)
             zs.append(z)
             activation = self.activation.forward(z)
             activations.append(activation)
-            print('-----------')
-        exit()
 
+        l = self.cost_derivative(activations[-1], y)
+        ab = self.activation.backward(zs[-1])
         # backward pass
-        delta = self.cost_derivative(activations[-1], y) * \
-            self.activation.backward(zs[-1])
+        delta = l * ab
 
         nabla_b[-1] = delta
         nabla_w[-1] = np.dot(delta, activations[-2].transpose())
@@ -125,8 +121,6 @@ class Network(object):
         for l in range(2, self.num_layers):
             z = zs[-l]
             sp = self.activation.backward(z)
-            print(l, z, sp, delta, activations[-l-1])
-            exit()
             delta = np.dot(self.weights[-l+1].transpose(), delta) * sp
             nabla_b[-l] = delta
             nabla_w[-l] = np.dot(delta, activations[-l-1].transpose())
@@ -137,7 +131,7 @@ class Network(object):
         network outputs the correct result. Note that the neural
         network's output is assumed to be the index of whichever
         neuron in the final layer has the highest activation."""
-        test_results = [(np.argmax(self.feedforward(x)), y)
+        test_results = [(np.argmax(self.feedforward(x)), np.argmax(y))
                         for (x, y) in test_data]
         return sum(int(x == y) for (x, y) in test_results)
 
@@ -151,27 +145,27 @@ def generate_data(seed, size):
     X, y = datasets.make_moons(size, noise=0.20)
     ds = []
     for i in range(size):
-        ds.append((X[i], y[i]))
+        if y[i] == 0:
+            t = np.array([1, 0])
+            t = t.reshape(-1, 1)
+            tx = np.array(X[i])
+            tx = tx.reshape(-1, 1)
+            ds.append((tx, t))
+        else:
+            t = np.array([0, 1])
+            t = t.reshape(-1, 1)
+            tx = np.array(X[i])
+            tx = tx.reshape(-1, 1)
+            ds.append((tx, t))
     return ds
 
 def main():
- #    m = [[-0.02818223,  0.42833187],
- # [ 0.06651722,  0.3024719 ],
- # [-0.63432209, -0.36274117]]
- #    v = [0.99633397, 0.1731019 ]
- #    b = [[-0.89546656],
- # [ 0.3869025 ]]
- #    print(np.dot(m, v) + b)
- #    exit()
     train_ds = generate_data(0, 200)
-    test_ds = generate_data(0, 20)
-    # print(train_ds)
-    model = Network([2,3,1], Sigmoid())
-    model.SGD(train_ds, 50, 12, 0.1, test_ds)
-    # visualize(X, y, model)
+    test_ds = generate_data(1, 20)
 
+    # print(train_ds)
+    model = Network([2, 20, 10, 2], LRelu())
+    model.SGD(train_ds, 500, 10, 0.01, test_ds)
 
 if __name__ == "__main__":
     main()
-
-
