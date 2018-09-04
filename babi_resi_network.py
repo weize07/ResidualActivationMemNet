@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 from activations.relu import Relu
 from activations.leaky_relu import LRelu
 from activations.sigmoid import Sigmoid
+from load_story import *
+import os
 
 class ResiNetwork(object):
 
@@ -40,20 +42,16 @@ class ResiNetwork(object):
         self.weights = [np.random.randn(y, x)
                         for x, y in zip(sizes[:-1], sizes[1:])]
         self.activation = activation
-        self.FORGET_RATE = 0.8
+        self.FORGET_RATE = 0.9
         self.LEARNING_RATE = 0.2
 
-    def feedforward(self, xs):
+    def feedforward(self, xs, q):
         """Return the output of the network if ``a`` is input."""
-        mem = xs[0:-1]
-        self.load_memory(mem)
-        x = xs[-1]
-        i = 0
-        for b, w in zip(self.biases, self.weights):
-            x = self.activation.forward(np.dot(w, x) + b + self.resi[i])
-            i += 1
+        self.load_memory(xs)
+        for b, w, r in zip(self.biases, self.weights, self.resi):
+            q = self.activation.forward(np.dot(w, q) + b + r)
         self.clear_memory()
-        return x
+        return q
 
     def SGD(self, training_data, epochs, mini_batch_size, eta,
             test_data=None):
@@ -88,16 +86,11 @@ class ResiNetwork(object):
         is the learning rate."""
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         nabla_w = [np.zeros(w.shape) for w in self.weights]
-        for xs, y, qi in mini_batch:
-            last_q = 0
-            for question_index in qi:
-                mem = xs[last_q : question_index]
-                self.load_memory(mem)
-                x = xs[question_index]
-                last_q = question_index + 1
-                delta_nabla_b, delta_nabla_w = self.backprop(x, y)
-                nabla_b = [nb + dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-                nabla_w = [nw + dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
+        for xs, q, y in mini_batch:
+            self.load_memory(xs)
+            delta_nabla_b, delta_nabla_w = self.backprop(q, y)
+            nabla_b = [nb + dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
+            nabla_w = [nw + dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
             self.clear_memory()
         self.weights = [w-(eta/len(mini_batch))*nw
                         for w, nw in zip(self.weights, nabla_w)]
@@ -108,7 +101,7 @@ class ResiNetwork(object):
         for x in mem:
             i = 0
             for b, w, r in zip(self.biases, self.weights, self.resi):
-                z = np.dot(w, x) + b
+                z = np.dot(w, x) + b + r * self.FORGET_RATE
                 x = self.activation.forward(z)
                 self.resi[i] = r * self.FORGET_RATE + x * self.LEARNING_RATE
                 i += 1
@@ -127,13 +120,11 @@ class ResiNetwork(object):
         activation = x
         activations = [x] # list to store all the activations, layer by layer
         zs = [] # list to store all the z vectors, layer by layer
-        i = 0
-        for b, w in zip(self.biases, self.weights):
-            z = np.dot(w, activation) + b + self.resi[i] * self.FORGET_RATE
+        for b, w, r in zip(self.biases, self.weights, self.resi):
+            z = np.dot(w, activation) + b + r * self.FORGET_RATE
             zs.append(z)
             activation = self.activation.forward(z)
             activations.append(activation)
-            i += 1
 
         l = self.cost_derivative(activations[-1], y)
         ab = self.activation.backward(zs[-1])
@@ -161,9 +152,13 @@ class ResiNetwork(object):
         network outputs the correct result. Note that the neural
         network's output is assumed to be the index of whichever
         neuron in the final layer has the highest activation."""
-        test_results = [(np.argmax(self.feedforward(x)), np.argmax(y))
-                        for (x, y) in test_data]
-        return sum(int(x == y) for (x, y) in test_results)
+        correct = 0
+        for (xs, q, y) in test_data:
+            pred_y = self.feedforward(xs, q)
+            # print(np.around(pred_y, 3), y)
+            if np.argmax(pred_y) == np.argmax(y):
+                correct += 1
+        return correct
 
     def cost_derivative(self, output_activations, y):
         """Return the vector of partial derivatives \partial C_x /
@@ -192,12 +187,50 @@ def generate_data(seed, size):
     return ds
 
 def main():
-    train_ds = generate_data(0, 200)
-    test_ds = generate_data(1, 20)
+    challenge = 'data/en/qa3_three-supporting-facts_{}.txt'
+    with open(challenge.format('train')) as train_f:
+        train = get_stories(train_f)
+    with open(challenge.format('test')) as test_f:
+        test = get_stories(test_f)
 
-    # print(train_ds)
-    model = ResiNetwork([2, 20, 10, 2], LRelu())
-    model.SGD(train_ds, 500, 10, 0.01, test_ds)
+    flatten = lambda data: reduce(lambda x, y: x + y, data)
+    vocab = set()
+    for story, q, answer in train + test:
+        vocab |= set(flatten(story) + q + [answer])
+    vocab = sorted(vocab)
+    print(vocab)
+
+    # Reserve 0 for masking via pad_sequences
+    vocab_size = len(vocab) + 1
+    word_idx = dict((c, i + 1) for i, c in enumerate(vocab))
+    story_maxlen = max(map(len, (x for x, _, _ in train + test)))
+    query_maxlen = max(map(len, (x for _, x, _ in train + test)))
+    if story_maxlen > query_maxlen:
+        query_maxlen = story_maxlen
+    else:
+        story_maxlen = query_maxlen
+
+    x, xq, y = vectorize_stories(train, word_idx, story_maxlen, query_maxlen)
+    tx, txq, ty = vectorize_stories(test, word_idx, story_maxlen, query_maxlen)
+
+    print('vocab = {}'.format(vocab))
+    print('x.shape = {}'.format(x.shape))
+    print('xq.shape = {}'.format(xq.shape))
+    print('y.shape = {}'.format(y.shape))
+    print('story_maxlen, query_maxlen = {}, {}'.format(story_maxlen, query_maxlen))
+    print(x[0].shape)
+    print(xq[0].shape)
+    print(y[0].shape)
+    # exit()
+
+    train_ds = list(zip(x, xq, y))
+    test_ds = list(zip(tx, txq, ty))
+    # train_ds = generate_data(0, 200)
+    # test_ds = generate_data(1, 20)
+    #
+    # # print(train_ds)
+    model = ResiNetwork([len(x[0][0]), 500, 250, len(y[0])], Relu())
+    model.SGD(train_ds, 1000, 10, 0.5, test_ds)
 
 if __name__ == "__main__":
     main()
