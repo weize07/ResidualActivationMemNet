@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from activations.relu import Relu
 from activations.leaky_relu import LRelu
 from activations.sigmoid import Sigmoid
+from activations.softmax import Softmax
 
 class ResiNetwork(object):
 
@@ -193,8 +194,8 @@ def main():
     test_ds = generate_data(1, 20)
 
     # print(train_ds)
-    model = ResiNetwork([2, 20, 10, 2], LRelu())
-    model.SGD(train_ds, 500, 10, 0.01, test_ds)
+    model = ResiNetwork([2, 20, 10, 2], Softmax())
+    model.SGD(train_ds, 500, 10, 0.5, test_ds)
 
 if __name__ == "__main__":
     main()

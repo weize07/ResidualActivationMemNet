@@ -9,6 +9,9 @@ class LRelu(object):
         return z
 
     def backward(self, z):
-        z[z <= 0] = 0.1
-        z[z > 0] = 1
+        for i in range(len(z)):
+            if z[i] <= 0:
+                z[i] = 0.1
+            else:
+                z[i] = 1
         return z
